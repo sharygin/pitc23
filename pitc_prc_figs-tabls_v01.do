@@ -1,13 +1,12 @@
 // notes
-** In general, the approach is to confirm other dataset to the format of the Multnomah County dataset
-** Cannot reproduce the variables parenting_youth and parenting_child in all datasets
 ** Washington Co. sheltered is missing HIV status.
+** 
 
 // working directory
 cd "C:\Users\sharygin\Desktop\Data_and_Figures"
 
 // prerequisites
-foreach p in "tablecol" "bigtab" {
+foreach p in "tablecol" "bigtab" "xtable" {
 	cap which "`p'"
 	if _rc ssc install `p'
 }
@@ -353,24 +352,28 @@ rename *rc *
 lab var id "PIT uid"
 lab var group_id "HHID"
 lab var hhtype "adult/child/family"
-lab var hhsize "N in HH (hh_size or hh_size2 iff missing)"
+lab var hhsize "N in HH"
 lab var hoh "HH head?"
-lab var agecat "<18/18-24/25-34/35-44/45-49/55-64/65+)"
-lab var gender "gender (f/m/n/q/t)"
+lab var agecat "ages <18/18-24/25-34/35-44/45-49/55-64/65+"
+lab var gender "gender f/m/n/q/t"
 lab var veteran "veteran?"
 lab var chronic "chronic homeless?"
 lab var mh "mental health disorder?"
 lab var sud "substance use disorder?"
 lab var hiv "AIDS or HIV?"
 lab var dv "victim of DV?"
-lab var source "HMIS or survey (ONSC)"
-lab var hispan "Hispanic/Latin(a)(o)(x)?"
-lab var race "race (w/n/b/a/p/m/.)"
+lab var source "HMIS or survey"
+lab var status "current status US/TH/ES"
+lab var hispan "Hispanic/Latinaox?"
+lab var race "race w/n/b/a/p/m/."
 lab var vet_hh "veteran in hh?"
 lab var youth_hh "youth age<25 in hh?"
 lab var child_hh "child age<18 in hh?"
 lab var chronic_hh "chronic homeless person in hh?"
-*lab var parenting_child "family hh w/child <18?"
+lab var parenting_child "family hh w/child <18?"
+lab var county "county/geo FIPS code"
+cap drop hh_size2
+lab var year "PITC year"
 
 // placeholder 2022 data
 expand 2, gen(dummy) // dummy data for 2022
@@ -404,10 +407,12 @@ global c3="eltblue*.9"
 // page21/table2
 use status county year if year==2023 using hrac_pitc23_data.dta, clear
 tablecol status if year==2023, colpct by(county)
+xtable status if year==2023, by(county) col filename(tables) sheet(table2) replace
 
 // page22/table3
 use status county year using hrac_pitc23_data.dta, clear
 tablecol status year, colpct by(county)
+xtable status year, by(county) col filename(tables) sheet(table3) modify
 
 // page22/fig2
 use status county year using hrac_pitc23_data.dta, clear
@@ -442,3 +447,7 @@ tw  (bar shr3 year, mla(shr3) mlabpos(6) barw(0.85) lc($c3 ) fc($c3 )) ///
 		symy(*1.75) symx(*.75) r(1)) aspect(1) xsize(4) ysize(4)
 graph save fig2.gph, replace
 graph export fig2.emf, replace
+
+// page44/table11
+use agecat status county hhtype year if year==2023 using hrac_pitc23_data.dta, clear
+xtable agecat status, by(county hhtype) mis col row filename(tables) sheet(table11) modify
