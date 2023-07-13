@@ -1,9 +1,11 @@
 // notes
-** Washington Co. sheltered is missing HIV status.
-** 
+** v01: Washington Co. sheltered is missing HIV status.
+** v02: added back health disphy disdev, and fixed multco 2022 race/eth
+**		clackamas 2022 sheltered missing health disphy disdev
+**		clack, mult 2023 missing health disphy disdev
 
 // working directory
-cd "C:\Users\sharygin\Desktop\Data_and_Figures"
+cd "C:\Users\sharygin\pdx\PROJECTS\_current\_pitc"
 
 // prerequisites
 foreach p in "tablecol" "bigtab" "xtable" "carryforward" {
@@ -11,7 +13,6 @@ foreach p in "tablecol" "bigtab" "xtable" "carryforward" {
 	if _rc ssc install `p'
 }
 
-/*
 /***
  *        __  _        ___   ____  ____  
  *       /  ]| |      /  _] /    ||    \ 
@@ -22,7 +23,7 @@ foreach p in "tablecol" "bigtab" "xtable" "carryforward" {
  *     \____||_____||_____||__|__||__|__|	2022
  *                                       
  */
- 
+
 // initialize 2022 dataset
 touch "hrac_pitc23_data_2022.dta", replace
  
@@ -47,8 +48,8 @@ import excel using "2022\Washington\03.29.2022 - 0630a - 2022 FINAL COMBINED She
 drop if uniqueid==""
 bys uniqueid: gen listme=_n
 keep if listme==1 // keep 1 obs per person.
-merge 1:1 uniqueid using `tmp', keep(1 3) keepus(mh sud) 
-for var mh sud: replace X="No" if _merge==1 // assume no mh/sud if not in disability detail dataset
+merge 1:1 uniqueid using `tmp', keep(1 3) keepus(mh sud health disphy disdev) 
+for var mh sud health disphy disdev: replace X="No" if _merge==1 // assume no mh/sud if not in disability detail dataset
 gen id=uniqueid
 gen group_id=hhgroup349
 unique id
@@ -106,7 +107,7 @@ gen source="HMIS"
 keep id group_id hhsize hh_typerc hoh ///
 	 genderrc hispanrc racerc veteranrc chronicrc sud dvrc mh agerc /// //hiv
 	 veteranrc_hh youth_hh chronicrc_hh child_hh ///
-	 status source // parenting_youth parenting_child 
+	 status source health disphy disdev // parenting_youth parenting_child 
 for any "hh_type" "gender" "race" "hispan" "veteran" "dv" "chronic" "age": ren Xrc X \\ cap ren Xrc_hh X_hh
 ren veteran_hh vet_hh
 gen byte county=67
@@ -186,7 +187,7 @@ gen source="Survey"
 keep id group_id hhsize hh_typerc hoh ///
 	 genderrc hispanrc racerc veteranrc chronicrc sud dvrc mh agerc /// //hiv
 	 veteranrc_hh chronicrc_hh youth_hh child_hh ///
-	 status source // parenting_youth parenting_child 
+	 status source health disphy disdev // parenting_youth parenting_child 
 for any "hh_type" "gender" "race" "hispan" "veteran" "dv" "chronic" "age": ren Xrc X \\ cap ren Xrc_hh X_hh
 ren veteran_hh vet_hh
 gen byte county=67
@@ -195,9 +196,10 @@ tostring id group_id, replace
 append using "hrac_pitc23_data_2022.dta"
 save "hrac_pitc23_data_2022.dta", replace
 
-// multnomah
+// multnomah (total N=5228)
 ** disability types by ID
 import excel using "2022\Multnomah\PIT Count_Local Data_Final Corrected.xlsx", clear firstrow case(lower)
+preserve
 gen id=pit_uid
 keep id disabilitytype
 gen hiv=disabilitytype=="HIV/AIDS"
@@ -208,8 +210,41 @@ gen disphy=disabilitytype=="Physical Disability"
 gen disdev=disabilitytype=="Developmental Disability"
 collapse (max) hiv-disdev, by(id)
 for var hiv-disdev: tostring X, replace \\ replace X="Yes" if X=="1" \\ replace X="No" if X=="0"
-tempfile tmp
-save `tmp', replace
+tempfile tmp1
+save `tmp1', replace
+** ethnicity by ID
+restore
+drop if inlist(raceeth,"Non-Hispanic White","BIPOC") // these are created, duplicate obs.
+gen id=pit_uid
+gen hispanrc="Hispanic/Latin(a)(o)(x)" if strpos(raceeth,"spanic")>0 & strpos(raceeth,"No")==0 
+replace hispanrc="Non-Hispanic/Non-Latin(a)(o)(x)" if hispanrc=="" & raceeth!="Race/ethnicity unreported" // only missing if skipped question.
+preserve
+contract id hispanrc
+bys id: gen listme=_n
+egen listme2=max(listme),by(id)
+drop if listme2>1 & inlist(hispanrc,"","Non-Hispanic/Non-Latin(a)(o)(x)") // if has a positive result, drop other results.
+tempfile tmp2
+save `tmp2', replace
+** race by ID
+restore
+gen racerc=""
+replace racerc="American Indian, Alaska Native, or Indigenous" if strpos(raceeth,"Indian")>0
+replace racerc="Asian or Asian American" if raceeth=="Asian or Asian American"
+replace racerc="Black, African American, or African" if inlist(raceeth,"African","Black, African American or African")
+replace racerc="Native Hawaiian or Pacific Islander" if raceeth=="Native Hawaiian or Pacific Islander"
+replace racerc="White" if inlist(raceeth,"White","Slavic","Middle Eastern")|raceeth=="Non-Hispanic White"
+replace racerc="Multiple" if raceeth=="MultiRacial"
+contract id racerc
+drop _freq
+gen chkr1=1 if racerc!=""
+egen chkr=sum(chkr1), by(id)
+replace racerc="Multiple" if chkr>1 & chkr<.
+contract id racerc
+bys id: gen listme=_n
+egen listme2=max(listme),by(id)
+drop if listme2>1 & racerc=="" // has a nonmissing race; drop missing.
+tempfile tmp3
+save `tmp3', replace
 ** deduplicated demographic file -- take modal nonmissing string response for deduplication
 import excel using "2022\Multnomah\PIT Count_Local Data_Final Corrected.xlsx", clear firstrow case(lower)
 gen id=pit_uid
@@ -225,16 +260,6 @@ bigtab hh_typerc hhtype
 gen genderrc=gender if inlist(gender,"Female", "Male", "Transgender", "No Single Gender", "Questioning")
 replace genderrc="No Single Gender" if gender=="Not Singular"
 bigtab genderrc gender
-gen hispanrc="Hispanic/Latin(a)(o)(x)" if strpos(raceeth,"spanic")>0 & strpos(raceeth,"no")==0 
-gen racerc=""
-replace racerc="American Indian, Alaska Native, or Indigenous" if strpos(raceeth,"Indian")>0
-replace racerc="Asian or Asian American" if raceeth=="Asian or Asian American"
-replace racerc="Black, African American, or African" if inlist(raceeth,"African","Black, African American or African")
-replace racerc="Native Hawaiian or Pacific Islander" if raceeth=="Native Hawaiian or Pacific Islander"
-replace racerc="White" if inlist(raceeth,"White","Slavic","Middle Eastern")|raceeth=="Non-Hispanic White"
-replace racerc="Multiple" if raceeth=="MultiRacial"
-replace racerc="Other" if raceeth=="Other"
-bigtab racerc raceeth, nocum // BIPOC is a problem, and Hispanic ethnicity is combined.
 replace vet=proper(vet)
 gen veteranrc=vet if inlist(vet,"Yes","No")
 replace vethousehold=proper(vethousehold)
@@ -250,13 +275,13 @@ foreach v of varlist veteranrc chronicrc {
 }
 gen status=livingsituation
 replace status="US" if status=="Unsheltered"
-** missing source. hispanic/race combined, no source. repeated records, duplicates not cleaned.
+** missing source. repeated records, processed race/eth and disabilities
 keep id group_id hh_typerc hoh age ///
-	 genderrc hispanrc racerc veteranrc chronicrc dvrc age /// 
-	 status // source parenting_youth parenting_child 
+	 genderrc veteranrc chronicrc dvrc age /// 
+	 status // source parenting_youth parenting_child + hispanrc racerc 
 bys id: gen listme=_n
 gsort id listme
-foreach v of varlist age status hoh hh_typerc genderrc hispanrc racerc veteranrc chronicrc dvrc {
+foreach v of varlist age status hoh hh_typerc genderrc veteranrc chronicrc dvrc {
 	cap egen m_`v'=mode(`v') if `v'!="", by(id) // strings 
 	cap egen m_`v'=mode(`v') if `v'<., by(id) // numeric
 	gsort id listme
@@ -268,7 +293,9 @@ foreach v of varlist age status hoh hh_typerc genderrc hispanrc racerc veteranrc
 }
 keep if listme==1 // now
 drop listme
-merge 1:1 id using `tmp', assert(1 3) nogen keepus(hiv sud mh) // add back hiv sud mh 
+merge 1:1 id using `tmp1', assert(1 3) nogen keepus(hiv sud mh health disphy disdev) // add back hiv sud mh and health conditions
+merge 1:1 id using `tmp2', assert(1 3) nogen keepus(hispanrc) // add back hispanic
+merge 1:1 id using `tmp3', assert(1 3) nogen keepus(racerc) // add back race
 unique id
 assert `r(N)'==`r(unique)'
 egen hhsize=count(id),by(group_id) // generate hhsize
@@ -297,7 +324,7 @@ egen chronic_hh=max(chronicn),by(group_id) // any chronic
 keep id group_id hh_type hoh hhsize ///
 	 gender hispan race veteran chronic dv age /// 
 	 vet_hh chronic_hh youth_hh child_hh ///
-	 hiv mh sud status // source parenting_youth parenting_child 
+	 hiv mh sud status health disphy disdev // source parenting_youth parenting_child 
 gen byte county=51
 gen int year=2022
 tostring id group_id, replace
@@ -376,10 +403,11 @@ replace chronicn=0 if chronicrc=="No"
 egen chronicrc_hh=max(chronicn),by(group_id) // any chro
 gen status=projecttype
 gen source="HMIS"
+for any "health" "disphy" "disdev": cap gen X="" // missing, have only 'disabyn'
 keep id group_id hhsize hh_typerc hoh ///
 	 genderrc hispanrc racerc veteranrc chronicrc sud dvrc mh hiv agerc /// 
 	 veteranrc_hh chronicrc_hh youth_hh child_hh ///
-	 status source // parenting_youth parenting_child 
+	 status source health disphy disdev // parenting_youth parenting_child 
 for any "hh_type" "gender" "race" "hispan" "veteran" "dv" "chronic" "age": ren Xrc X \\ cap ren Xrc_hh X_hh
 ren veteran_hh vet_hh
 gen byte county=5
@@ -391,6 +419,10 @@ save "hrac_pitc23_data_2022.dta", replace
 // clackamas unsheltered
 ** a tricky one. this has the household members with responses prefixed "hhm1_" and "hhm2_" with different Q numbers.
 ** note that hh members not asked hispanic. DV flee is only asked for DV=yes.
+** approach is to duplicate records for hh members, then rename to be consistent with main hh reporters, then append.
+** health = q13_chronic + hhmX_q12_chronic
+** disphy = q13_phydisab + hhmX_q12_phydisab
+** disdev = q13_devdisab + hhmX_q12_devdisab
 import excel using "2022\Clackamas\CLACKAMAS PIT 2022 Survey Data_FINAL_4-16-22_copy.xlsx", clear firstrow case(lower)
 tostring id, replace
 gen group_id=id
@@ -480,6 +512,12 @@ gen hiv="Yes" if x13_hivaids=="Selected"
 replace hiv="No" if x13_hivaids=="Not Selected"
 gen mh="Yes" if x13_mental=="Selected"
 replace mh="No" if x13_mental=="Not Selected"
+gen health="Yes" if x13_chronic=="Selected"
+replace health="No" if x13_chronic=="Not Selected"
+gen disphy="Yes" if x13_phydisab=="Selected"
+replace disphy="No" if x13_phydisab=="Not Selected"
+gen disdev="Yes" if x13_devdisab=="Selected"
+replace disdev="No" if x13_devdisab=="Not Selected"
 unique id
 assert `r(N)'==`r(unique)'
 gen count=1
@@ -503,7 +541,7 @@ by group_id: carryforward hh_type, replace
 ** missing chronic, hispanic for non-hoh, hiv always no.
 keep id group_id hoh hh_type ///
 	genderrc veteranrc racerc hispanrc dvrc sud hiv mh ///
-	youth_hh child_hh hhsize
+	youth_hh child_hh hhsize health disphy disdev
 for any "gender" "veteran" "race" "hispan" "dv": ren Xrc X
 gen status="US"
 gen source="Survey"
@@ -517,8 +555,7 @@ save "hrac_pitc23_data_2022.dta", replace
 order county year id group_id hhsize hoh hh_type ///
 		hh_type child_hh youth_hh vet_hh chronic_hh ///
 		hoh age gender hispan race veteran ///
-		chronic sud dv hiv mh status source
-
+		chronic sud dv hiv mh health disphy disdev status source 
 // cleaning
 lab def c 5 "Clackamas" 51 "Multnomah" 67 "Washington", replace
 label values county c
@@ -532,7 +569,7 @@ lab def r 1 "White" 2 "Black, African American, or African" 3 "American Indian, 
 	4 "Asian or Asian American" 5 "Native Hawaiian or Pacific Islander" 6 "Multiple", replace
 encode race, gen(racerc) label(r) noextend
 lab def v 0 "No" 1 "Yes", replace
-for var veteran chronic sud hiv dv mh: encode X, gen(Xrc) label(v) noextend
+for var veteran chronic sud hiv dv mh health disphy disdev: encode X, gen(Xrc) label(v) noextend
 destring *_hh, replace ignore("Inf")
 lab def a 1 "Under 18" 2 "18-24" 3 "25-34" 4 "35-44" 5 "45-54" 6 "55-64" 7 "65+", replace
 encode age, gen(agecat) label(a) noextend
@@ -543,7 +580,7 @@ foreach v in "ES Emergency shelter" "TH Transitional housing" "US Unsheltered" {
 lab def s 1 "Unsheltered" 2 "Emergency shelter" 3 "Transitional housing", replace
 encode status, gen(statusrc) label(s) noextend
 gen sourcerc=source
-drop hh_type gender age hispan race veteran chronic sud hiv dv mh status source
+drop hh_type gender age hispan race veteran chronic sud hiv dv mh health disphy disdev status source 
 rename *rc *
 
 // labels
@@ -560,6 +597,9 @@ lab var mh "mental health disorder?"
 lab var sud "substance use disorder?"
 lab var hiv "AIDS or HIV?"
 lab var dv "victim of DV?"
+lab var health "chronic health condition?"
+lab var disphy "physical diability?"
+lab var disdev "development disability?"
 lab var source "HMIS or survey"
 lab var status "current status US/TH/ES"
 lab var hispan "Hispanic/Latina/o/x?"
@@ -577,7 +617,6 @@ lab var year "PITC year"
 notes drop _all
 compress
 save "hrac_pitc23_data_2022.dta", replace
-*/
 		
 /***
  *        __  _        ___   ____  ____  
@@ -590,7 +629,6 @@ save "hrac_pitc23_data_2022.dta", replace
  *                                       
  */
 
- /*
 // initialize dataset
 touch "hrac_pitc23_data_2023.dta", replace
  
@@ -608,8 +646,8 @@ for var mh sud disphy disdev health: replace X="Yes" if X=="1" \\ replace X="No"
 tempfile tmp 
 save `tmp', replace // conditions
 import delim using "2023\Data and Tables - Washington\0427_sheltered_Data_Washington_Sheltered_Client.csv", clear  varn(1)
-merge 1:1 clientid using `tmp', keep(1 3) keepus(mh sud) 
-for var mh sud: replace X="No" if X=="" // assume NO if not in disability HMIS records.
+merge 1:1 clientid using `tmp', keep(1 3) keepus(mh sud health disphy disdev) 
+for var mh sud health disphy disdev: replace X="No" if X=="" // assume NO if not in disability HMIS records.
 gen id=clientid
 gen group_id=hhid
 gen hh_type=""
@@ -686,7 +724,7 @@ drop parenting_youth* // not keeping until this is sorted out.
 keep id group_id hh_size hh_type ///
 	 vet_hh youth_hh chronic_hh child_hh ///
 	 hoh gender ethnicity race veteran chronic sud dv mh age ///
-	 status // parenting_youth parenting_child 
+	 health disphy disdev status // parenting_youth parenting_child 
 gen source="HMIS"
 gen int year=2023
 gen byte county=67
@@ -768,7 +806,7 @@ replace source="HMIS" // actual source="Street Outreach" or "CES", but all nomis
 keep id group_id county year hh_size hh_type ///
 	 vet_hh youth_hh chronic_hh child_hh ///
 	 gender ethnicity race veteran chronic sud dv mh hiv age ///
-	 status source // parenting_youth parenting_child 
+	 health disphy disdev status source // parenting_youth parenting_child 
 tostring id group_id, replace
 append using "hrac_pitc23_data_2023.dta"
 save "hrac_pitc23_data_2023.dta", replace
@@ -851,7 +889,7 @@ gen stay3=howmanyseparatetimeshaveyoustaye
 ** missing hohrelate
 keep id group_id hh_size hh_type ///
 	 vet_hh youth_hh chronic_hh child_hh ///
-	 gender ethnicity race veteran chronic sud dv mh hiv age 
+	 gender ethnicity race veteran chronic sud dv mh hiv age health disphy disdev
 gen int county=67
 gen int year=2023
 gen status="US"
@@ -894,7 +932,7 @@ lab def r 1 "White" 2 "Black, African American, or African" 3 "American Indian, 
 	4 "Asian or Asian American" 5 "Native Hawaiian or Pacific Islander" 6 "Multiple", replace
 encode race, gen(racerc) label(r) noextend
 lab def v 0 "No" 1 "Yes", replace
-for var veteran chronic sud hiv dv mh: encode X, gen(Xrc) label(v) noextend
+for var veteran chronic sud hiv dv mh health disphy disdev: encode X, gen(Xrc) label(v) noextend
 destring *_hh, replace ignore("Inf")
 lab def a 1 "Under 18" 2 "18-24" 3 "25-34" 4 "35-44" 5 "45-54" 6 "55-64" 7 "65+", replace
 encode age, gen(agecat) label(a) noextend
@@ -905,7 +943,7 @@ foreach v in "ES Emergency shelter" "TH Transitional housing" "US Unsheltered" {
 lab def s 1 "Unsheltered" 2 "Emergency shelter" 3 "Transitional housing", replace
 encode status, gen(statusrc) label(s) noextend
 gen sourcerc=source
-drop hh_type gender age ethnicity race veteran chronic sud hiv dv mh status source
+drop hh_type gender age ethnicity race veteran chronic sud hiv dv mh health disphy disdev status source 
 rename *rc *
 
 // labels
@@ -922,6 +960,9 @@ lab var mh "mental health disorder?"
 lab var sud "substance use disorder?"
 lab var hiv "AIDS or HIV?"
 lab var dv "victim of DV?"
+lab var health "chronic health condition?"
+lab var disphy "physical diability?"
+lab var disdev "development disability?"
 lab var source "HMIS or survey"
 lab var status "current status US/TH/ES"
 lab var hispan "Hispanic/Latinaox?"
@@ -939,7 +980,6 @@ lab var year "PITC year"
 notes drop _all
 compress
 save  "hrac_pitc23_data_2023.dta", replace
-*/
 
 /***
  *     ____     ___  ____   ___   ____  ______ 
@@ -952,7 +992,6 @@ save  "hrac_pitc23_data_2023.dta", replace
  *                                             
  */
 
- 
 // combined dataset
 use "hrac_pitc23_data_2023.dta", clear
 append using "hrac_pitc23_data_2022.dta"
@@ -961,7 +1000,19 @@ lab def c 0 "Tri-County", modify
 append using "hrac_pitc23_data_2022.dta"
 append using "hrac_pitc23_data_2023.dta"
 save "hrac_pitc23_data_2022-23.dta", replace
- 
+export delim using "hrac_pitc23_data_2022-23.csv", replace // csv format
+qui {
+    log using hrac_pitc23_data_2022-23_codebook.txt, text replace
+    nois codebook, compact
+    log close
+}
+
+// check
+bys year: tab county hispan, mis
+bys year: tab county health, mis
+
+~!END
+
 // define color schemes
 // 1. 3-way 
 global c1="forest_green*.9"
